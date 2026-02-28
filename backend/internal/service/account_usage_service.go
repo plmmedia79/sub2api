@@ -811,15 +811,7 @@ func (s *AccountUsageService) getCopilotUsage(ctx context.Context, account *Acco
 			return s.getCopilotLocalUsage(ctx, account, now)
 		}
 
-		// DEBUG: 记录 API 响应原始数据
-		quota := apiResp.QuotaSnapshots.Chat
-		premiumQuota := apiResp.QuotaSnapshots.PremiumInteractions
-		log.Printf("[DEBUG] Copilot API response for account %d: quota_reset_date=%s, plan=%s",
-			account.ID, apiResp.QuotaResetDate, apiResp.CopilotPlan)
-		log.Printf("[DEBUG] Chat quota: entitlement=%.0f, remaining=%.0f, percent_remaining=%.2f, unlimited=%v",
-			quota.Entitlement, quota.QuotaRemaining, quota.PercentRemaining, quota.Unlimited)
-		log.Printf("[DEBUG] Premium quota: entitlement=%.0f, remaining=%.0f, percent_remaining=%.2f, unlimited=%v",
-			premiumQuota.Entitlement, premiumQuota.QuotaRemaining, premiumQuota.PercentRemaining, premiumQuota.Unlimited)
+		// 优先使用 premium_interactions 配额（Copilot 的主要计费指标）
 
 		// 解析 quota_reset_date（优先使用 UTC 格式，回退到日期格式）
 		var resetAt time.Time
@@ -849,7 +841,6 @@ func (s *AccountUsageService) getCopilotUsage(ctx context.Context, account *Acco
 			// 如果 premium_interactions 没有数据，则回退到 chat 配额
 			effectiveQuota := apiResp.QuotaSnapshots.PremiumInteractions
 			if effectiveQuota.Entitlement == 0 && effectiveQuota.QuotaRemaining == 0 {
-				log.Printf("[DEBUG] Premium quota is empty, falling back to chat quota")
 				effectiveQuota = apiResp.QuotaSnapshots.Chat
 			}
 
@@ -867,9 +858,6 @@ func (s *AccountUsageService) getCopilotUsage(ctx context.Context, account *Acco
 			if effectiveQuota.Entitlement > 0 {
 				usedReqs = int64(effectiveQuota.Entitlement - effectiveQuota.QuotaRemaining)
 			}
-
-			log.Printf("[DEBUG] Copilot usage calculated for account %d: utilization=%.2f%%, used=%d, limit=%.0f",
-				account.ID, utilization, usedReqs, effectiveQuota.Entitlement)
 
 			// Copilot API 返回的是月度配额，应该放入 CopilotMonthly
 			usage.CopilotMonthly = &UsageProgress{

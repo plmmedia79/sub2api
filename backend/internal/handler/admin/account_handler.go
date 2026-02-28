@@ -1547,35 +1547,37 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 
 	// Handle Copilot accounts: fetch models from upstream
 	if account.Platform == service.PlatformCopilot {
-		rawBody, err := h.copilotGatewayService.FetchModels(c.Request.Context(), account)
-		if err == nil {
-			// Parse upstream response and convert to ClaudeModel-compatible format
-			type upstreamModel struct {
-				ID string `json:"id"`
-			}
-			type upstreamResponse struct {
-				Data []upstreamModel `json:"data"`
-			}
-			var upstream upstreamResponse
-			if json.Unmarshal(rawBody, &upstream) == nil && len(upstream.Data) > 0 {
-				type modelEntry struct {
-					ID          string `json:"id"`
-					Type        string `json:"type"`
-					DisplayName string `json:"display_name"`
+		if h.copilotGatewayService != nil {
+			rawBody, err := h.copilotGatewayService.FetchModels(c.Request.Context(), account)
+			if err == nil {
+				// Parse upstream response and convert to ClaudeModel-compatible format
+				type upstreamModel struct {
+					ID string `json:"id"`
 				}
-				models := make([]modelEntry, 0, len(upstream.Data))
-				for _, m := range upstream.Data {
-					models = append(models, modelEntry{
-						ID:          m.ID,
-						Type:        "model",
-						DisplayName: m.ID,
-					})
+				type upstreamResponse struct {
+					Data []upstreamModel `json:"data"`
 				}
-				response.Success(c, models)
-				return
+				var upstream upstreamResponse
+				if json.Unmarshal(rawBody, &upstream) == nil && len(upstream.Data) > 0 {
+					type modelEntry struct {
+						ID          string `json:"id"`
+						Type        string `json:"type"`
+						DisplayName string `json:"display_name"`
+					}
+					models := make([]modelEntry, 0, len(upstream.Data))
+					for _, m := range upstream.Data {
+						models = append(models, modelEntry{
+							ID:          m.ID,
+							Type:        "model",
+							DisplayName: m.ID,
+						})
+					}
+					response.Success(c, models)
+					return
+				}
+			} else {
+				log.Printf("[Admin] Copilot FetchModels failed, falling back to static list: %v", err)
 			}
-		} else {
-			log.Printf("[Admin] Copilot FetchModels failed, falling back to static list: %v", err)
 		}
 		// Fallback: return models from DefaultCopilotModelMapping
 		type modelEntry struct {

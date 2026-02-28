@@ -38,7 +38,9 @@ func (s *copilotUsageService) FetchUsage(ctx context.Context, accessToken, proxy
 		return nil, fmt.Errorf("create request failed: %w", err)
 	}
 
-	// 设置请求头（参考 copilot-api 实现）
+	// 设置请求头 — 注意：这些头是 GitHub Copilot Usage API（/copilot_internal/user）专用，
+	// 与网关路径（/chat/completions 等）的请求头无关。网关路径已对齐 opencode 实现，
+	// 不再发送 editor-version 等头。Usage API 是独立的 GitHub 内部接口，需要这些头才能正常工作。
 	req.Header.Set("authorization", "token "+accessToken)
 	req.Header.Set("accept", "application/json")
 	req.Header.Set("user-agent", "GitHubCopilotChat/1.0.0")

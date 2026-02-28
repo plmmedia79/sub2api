@@ -49,7 +49,9 @@ func ProcessResponsesStream(reader io.Reader, handler StreamEventHandler) (*Resp
 		if line == "" || strings.HasPrefix(line, ":") {
 			// Forward comments and empty lines as-is
 			if line != "" {
-				_ = handler("", line)
+				if err := handler("", line); err != nil {
+					return nil, err
+				}
 			}
 			continue
 		}
@@ -86,7 +88,9 @@ func ProcessResponsesStream(reader io.Reader, handler StreamEventHandler) (*Resp
 				}
 			} else {
 				// No explicit event type, infer from data
-				_ = handler("", processedData)
+				if err := handler("", processedData); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -436,7 +440,9 @@ func flushRemainingEvents(state *ResponsesStreamState, handler StreamEventHandle
 			"text":         state.CurrentText,
 		}
 		if data, err := json.Marshal(doneEvent); err == nil {
-			_ = handler("response.output_text.done", string(data))
+			if err := handler("response.output_text.done", string(data)); err != nil {
+				return err
+			}
 		}
 		state.CurrentText = ""
 	}
@@ -453,7 +459,9 @@ func flushRemainingEvents(state *ResponsesStreamState, handler StreamEventHandle
 				doneEvent["arguments"] = state.ToolCalls[i].Arguments
 			}
 			if data, err := json.Marshal(doneEvent); err == nil {
-				_ = handler("response.function_call_arguments.done", string(data))
+				if err := handler("response.function_call_arguments.done", string(data)); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -467,7 +475,9 @@ func flushRemainingEvents(state *ResponsesStreamState, handler StreamEventHandle
 				"summary_index": state.ReasoningBlocks[i].SummaryIndex,
 			}
 			if data, err := json.Marshal(doneEvent); err == nil {
-				_ = handler("response.reasoning_summary_text.done", string(data))
+				if err := handler("response.reasoning_summary_text.done", string(data)); err != nil {
+					return err
+				}
 			}
 		}
 	}

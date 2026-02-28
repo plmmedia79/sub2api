@@ -54,7 +54,7 @@ export function useCopilotOAuth() {
 
   const startPolling = (onSuccess: (accessToken: string) => void) => {
     if (!deviceCode.value) {
-      error.value = 'No device code available'
+      error.value = t('admin.accounts.oauth.copilot.noDeviceCode')
       return
     }
 

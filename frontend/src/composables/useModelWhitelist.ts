@@ -363,11 +363,12 @@ export const commonErrorCodes = [
   { value: 529, label: 'Overloaded' }
 ]
 
-// GitHub Copilot 支持的模型
+// GitHub Copilot 支持的模型（与 backend/internal/domain/constants.go DefaultCopilotModelMapping 保持一致）
 const copilotModels = [
-  'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-opus-4-6', 'claude-haiku-4-5',
-  'gpt-5', 'gpt-5-mini',
-  'gemini-3-flash-preview', 'gemini-3-pro-preview',
+  'claude-sonnet-4.6', 'claude-sonnet-4.5', 'claude-opus-4.6', 'claude-opus-4.5', 'claude-haiku-4.5',
+  'gpt-5-mini', 'gpt-5.1', 'gpt-5.2',
+  'gpt-5.1-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'gpt-5.2-codex',
+  'gemini-3-flash-preview', 'gemini-3.1-pro-preview',
 ]
 
 // =====================

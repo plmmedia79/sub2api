@@ -2257,6 +2257,7 @@ export default {
           codeCopied: '代码已复制到剪贴板',
           waitingForAuth: '等待授权中...',
           waitingForAuthDesc: '请在浏览器中完成授权，此页面将自动更新。',
+          noDeviceCode: '没有可用的设备代码，请先发起授权流程。',
           codeExpired: '授权代码已过期，请重试。',
           authFailed: 'GitHub 授权失败',
           authSuccess: 'GitHub Copilot 授权成功',
