@@ -86,6 +86,7 @@ func provideCleanup(
 	geminiOAuth *service.GeminiOAuthService,
 	antigravityOAuth *service.AntigravityOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
+	opencodeVersion *service.OpenCodeVersionService,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -214,6 +215,10 @@ func provideCleanup(
 				if openAIGateway != nil {
 					openAIGateway.CloseOpenAIWSPool()
 				}
+				return nil
+			}},
+			{"OpenCodeVersionService", func() error {
+				opencodeVersion.Stop()
 				return nil
 			}},
 		}
