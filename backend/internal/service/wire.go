@@ -72,6 +72,13 @@ func ProvideUsageCleanupService(repo UsageCleanupRepository, timingWheel *Timing
 }
 
 // ProvideAccountExpiryService creates and starts AccountExpiryService.
+// ProvideOpenCodeVersionService creates and starts OpenCodeVersionService.
+func ProvideOpenCodeVersionService() *OpenCodeVersionService {
+	svc := NewOpenCodeVersionService()
+	svc.Start()
+	return svc
+}
+
 func ProvideAccountExpiryService(accountRepo AccountRepository) *AccountExpiryService {
 	svc := NewAccountExpiryService(accountRepo, time.Minute)
 	svc.Start()
@@ -340,6 +347,10 @@ var ProviderSet = wire.NewSet(
 	NewOpenAITokenProvider,
 	NewClaudeTokenProvider,
 	NewAntigravityGatewayService,
+	NewCopilotGatewayService,
+	NewCopilotTokenProvider,
+	NewCopilotOAuthService,
+	ProvideOpenCodeVersionService,
 	ProvideRateLimitService,
 	NewAccountUsageService,
 	NewAccountTestService,
