@@ -12,6 +12,7 @@ import (
 )
 
 const defaultCopilotUsageURL = "https://api.github.com/copilot_internal/user"
+const githubAPIVersion = "2025-10-01"
 
 type copilotUsageService struct {
 	usageURL     string
@@ -46,7 +47,7 @@ func (s *copilotUsageService) FetchUsage(ctx context.Context, accessToken, proxy
 	req.Header.Set("user-agent", "GitHubCopilotChat/1.0.0")
 	req.Header.Set("editor-version", "vscode/1.0.0")
 	req.Header.Set("editor-plugin-version", "copilot-chat/1.0.0")
-	req.Header.Set("x-github-api-version", "2025-10-01")
+	req.Header.Set("x-github-api-version", githubAPIVersion)
 
 	var resp *http.Response
 
@@ -72,7 +73,7 @@ func (s *copilotUsageService) FetchUsage(ctx context.Context, accessToken, proxy
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
 	}
 

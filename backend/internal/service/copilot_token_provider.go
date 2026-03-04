@@ -14,14 +14,15 @@ import (
 )
 
 const (
-	copilotTokenExchangeURL = "https://api.github.com/copilot_internal/v2/token"
-	copilotUserAgent        = "GithubCopilot/1.0"
-	copilotEditorVersion    = "vscode/1.100.0"
-	copilotPluginVersion    = "copilot/1.300.0"
-	copilotIntegrationID    = "vscode-chat"
-	copilotOpenAIIntent     = "conversation-panel"
-	tokenRefreshBuffer      = 5 * time.Minute
-	copilotTokenHTTPTimeout = 30 * time.Second
+	copilotTokenExchangeURL  = "https://api.github.com/copilot_internal/v2/token"
+	copilotUserAgent         = "GithubCopilot/1.0"
+	copilotEditorVersion     = "vscode/1.100.0"
+	copilotPluginVersion     = "copilot/1.300.0"
+	copilotIntegrationID     = "vscode-chat"
+	copilotOpenAIIntent      = "conversation-panel"
+	tokenRefreshBuffer       = 5 * time.Minute
+	copilotTokenHTTPTimeout  = 30 * time.Second
+	cacheCleanupInterval     = 30 * time.Minute
 )
 
 // cachedCopilotToken holds a Copilot session token with its expiry.
@@ -43,12 +44,55 @@ type CopilotTokenProvider struct {
 	cache      map[int64]*cachedCopilotToken
 	httpClient *http.Client
 	sf         singleflight.Group
+	stopCh     chan struct{}
+	wg         sync.WaitGroup
 }
 
 func NewCopilotTokenProvider() *CopilotTokenProvider {
 	return &CopilotTokenProvider{
 		cache:      make(map[int64]*cachedCopilotToken),
 		httpClient: &http.Client{Timeout: copilotTokenHTTPTimeout},
+		stopCh:     make(chan struct{}),
+	}
+}
+
+// StartCleanup starts the background goroutine that removes expired cache entries every 30 minutes.
+func (p *CopilotTokenProvider) StartCleanup() {
+	p.wg.Add(1)
+	go p.cleanupLoop()
+}
+
+// StopCleanup signals the cleanup goroutine to exit and waits for it to finish.
+func (p *CopilotTokenProvider) StopCleanup() {
+	close(p.stopCh)
+	p.wg.Wait()
+}
+
+// cleanupLoop periodically removes expired entries from the cache.
+func (p *CopilotTokenProvider) cleanupLoop() {
+	defer p.wg.Done()
+	ticker := time.NewTicker(cacheCleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.stopCh:
+			return
+		case <-ticker.C:
+			p.removeExpired()
+		}
+	}
+}
+
+// removeExpired deletes all expired entries from the cache.
+func (p *CopilotTokenProvider) removeExpired() {
+	now := time.Now()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for id, cached := range p.cache {
+		if now.After(cached.expiresAt) {
+			delete(p.cache, id)
+		}
 	}
 }
 

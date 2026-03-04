@@ -75,48 +75,11 @@ type copilotForwardFunc func(ctx context.Context, c *gin.Context, account *servi
 // This matches opencode's behavior where GPT-5+ models use /responses.
 func (h *CopilotGatewayHandler) ChatCompletions(c *gin.Context) {
 	h.handleForward(c, "chat_completions", func(ctx context.Context, c *gin.Context, account *service.Account, body []byte) (*service.CopilotForwardResult, error) {
-		if isResponsesOnlyModel(gjson.GetBytes(body, "model").String()) {
+		if service.IsResponsesOnlyModel(gjson.GetBytes(body, "model").String()) {
 			return h.copilotGatewayService.ForwardChatAsResponses(ctx, c, account, body)
 		}
 		return h.copilotGatewayService.Forward(ctx, c, account, body)
 	})
-}
-
-// isResponsesOnlyModel returns true for models that should use the /responses endpoint.
-// This matches opencode's shouldUseCopilotResponsesApi logic:
-// - Codex models (contain "codex" in the name) always use /responses
-// - GPT-5+ models (major version >= 5) use /responses, except gpt-5-mini
-func isResponsesOnlyModel(model string) bool {
-	lower := strings.ToLower(model)
-	// First check for codex models (explicit routing)
-	if strings.Contains(lower, "codex") {
-		return true
-	}
-	// Then check if it's a GPT-5+ model (major version >= 5)
-	// Exception: gpt-5-mini uses /chat/completions (matches opencode behavior)
-	if strings.HasPrefix(lower, "gpt-") {
-		if strings.HasPrefix(lower, "gpt-5-mini") {
-			return false
-		}
-		rest := model[4:] // Skip "gpt-"
-		if len(rest) == 0 {
-			return false
-		}
-		// Extract major version number
-		i := 0
-		for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
-			i++
-		}
-		if i == 0 {
-			return false
-		}
-		major := 0
-		for _, ch := range rest[:i] {
-			major = major*10 + int(ch-'0')
-		}
-		return major >= 5
-	}
-	return false
 }
 
 // Responses handles Copilot responses endpoint.

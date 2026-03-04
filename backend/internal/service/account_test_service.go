@@ -1571,13 +1571,24 @@ func (s *AccountTestService) sendErrorAndEnd(c *gin.Context, errorMsg string) er
 	return fmt.Errorf("%s", errorMsg)
 }
 
-// shouldUseCopilotResponsesAPI mirrors opencode's logic: GPT-5+ (excluding gpt-5-mini) uses /responses.
-func shouldUseCopilotResponsesAPI(modelID string) bool {
-	if !strings.HasPrefix(modelID, "gpt-") {
+// IsResponsesOnlyModel returns true for models that should use the /responses endpoint.
+// Codex models always use /responses. GPT-5+ models (major version >= 5) use /responses,
+// except gpt-5-mini which uses /chat/completions. This matches opencode's routing logic.
+func IsResponsesOnlyModel(modelID string) bool {
+	lower := strings.ToLower(modelID)
+	// Codex models always use /responses
+	if strings.Contains(lower, "codex") {
+		return true
+	}
+	// GPT-5+ models use /responses (except gpt-5-mini)
+	if !strings.HasPrefix(lower, "gpt-") {
+		return false
+	}
+	if strings.HasPrefix(lower, "gpt-5-mini") {
 		return false
 	}
 	// Extract major version number after "gpt-"
-	rest := modelID[4:]
+	rest := lower[4:]
 	i := 0
 	for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
 		i++
@@ -1589,10 +1600,7 @@ func shouldUseCopilotResponsesAPI(modelID string) bool {
 	for _, ch := range rest[:i] {
 		major = major*10 + int(ch-'0')
 	}
-	if major < 5 {
-		return false
-	}
-	return !strings.HasPrefix(modelID, "gpt-5-mini")
+	return major >= 5
 }
 
 // testCopilotAccountConnection tests a GitHub Copilot account's connection.
@@ -1622,7 +1630,7 @@ func (s *AccountTestService) testCopilotAccountConnection(c *gin.Context, accoun
 	var apiURL string
 	var payloadBytes []byte
 
-	if shouldUseCopilotResponsesAPI(testModelID) {
+	if IsResponsesOnlyModel(testModelID) {
 		// Responses API for GPT-5+
 		apiURL = copilotUpstreamResponsesURL
 		payload := map[string]any{
@@ -1691,7 +1699,7 @@ func (s *AccountTestService) testCopilotAccountConnection(c *gin.Context, accoun
 	}
 
 	// Route to appropriate stream processor
-	if shouldUseCopilotResponsesAPI(testModelID) {
+	if IsResponsesOnlyModel(testModelID) {
 		return s.processOpenAIStream(c, resp.Body)
 	}
 	return s.processCopilotChatStream(c, resp.Body)
@@ -1701,16 +1709,11 @@ func (s *AccountTestService) testCopilotAccountConnection(c *gin.Context, accoun
 // Extracts text from choices[0].delta.content.
 func (s *AccountTestService) processCopilotChatStream(c *gin.Context, body io.Reader) error {
 	reader := bufio.NewReader(body)
-	receivedDone := false
 
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
-				if receivedDone {
-					s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
-					return nil
-				}
 				return s.sendErrorAndEnd(c, "Stream ended unexpectedly without [DONE]")
 			}
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Stream read error: %s", err.Error()))

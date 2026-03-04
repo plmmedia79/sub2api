@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -24,9 +23,11 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -1547,6 +1548,11 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 
 	// Handle Copilot accounts: fetch models from upstream
 	if account.Platform == service.PlatformCopilot {
+		type modelEntry struct {
+			ID          string `json:"id"`
+			Type        string `json:"type"`
+			DisplayName string `json:"display_name"`
+		}
 		if h.copilotGatewayService != nil {
 			rawBody, err := h.copilotGatewayService.FetchModels(c.Request.Context(), account)
 			if err == nil {
@@ -1559,11 +1565,6 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 				}
 				var upstream upstreamResponse
 				if json.Unmarshal(rawBody, &upstream) == nil && len(upstream.Data) > 0 {
-					type modelEntry struct {
-						ID          string `json:"id"`
-						Type        string `json:"type"`
-						DisplayName string `json:"display_name"`
-					}
 					models := make([]modelEntry, 0, len(upstream.Data))
 					for _, m := range upstream.Data {
 						models = append(models, modelEntry{
@@ -1576,15 +1577,10 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 					return
 				}
 			} else {
-				log.Printf("[Admin] Copilot FetchModels failed, falling back to static list: %v", err)
+				logger.L().Warn("admin.copilot_fetch_models_fallback", zap.Error(err))
 			}
 		}
 		// Fallback: return models from DefaultCopilotModelMapping
-		type modelEntry struct {
-			ID          string `json:"id"`
-			Type        string `json:"type"`
-			DisplayName string `json:"display_name"`
-		}
 		seen := make(map[string]struct{})
 		var models []modelEntry
 		for _, mapped := range domain.DefaultCopilotModelMapping {

@@ -416,11 +416,11 @@ type ResponsesStreamState struct {
 
 	// Tool call tracking
 	ToolCalls       []ResponsesToolCallState
-	CurrentToolCall *ResponsesToolCallState
+	CurrentToolCall *ResponsesToolCallState // Derived from currentToolCallIndex; always use refreshCurrentToolCall after appends
 
 	// Reasoning tracking
 	ReasoningBlocks  []ResponsesReasoningState
-	CurrentReasoning *ResponsesReasoningState
+	CurrentReasoning *ResponsesReasoningState // Derived from currentReasoningIndex; always use refreshCurrentReasoning after appends
 
 	// Usage tracking
 	InputTokens  int
@@ -432,6 +432,11 @@ type ResponsesStreamState struct {
 
 	// SSE event tracking
 	currentEventType string // Tracks the current SSE event type between lines
+
+	// Index-based tracking to prevent dangling pointers after slice reallocation.
+	// -1 means no active item.
+	currentToolCallIndex  int
+	currentReasoningIndex int
 }
 
 // ResponsesToolCallState tracks a single tool call during streaming.

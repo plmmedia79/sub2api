@@ -72,7 +72,7 @@ func (s *CopilotOAuthService) InitiateDeviceCode(ctx context.Context) (*CopilotD
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read device code response: %w", err)
 	}
@@ -123,7 +123,7 @@ func (s *CopilotOAuthService) PollAccessToken(ctx context.Context, deviceCode st
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read token response: %w", err)
 	}
