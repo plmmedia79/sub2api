@@ -6795,9 +6795,11 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		body, reqModel = normalizeClaudeOAuthRequestBody(body, reqModel, normalizeOpts)
 	}
 
-	// Antigravity 账户不支持 count_tokens，返回 404 让客户端 fallback 到本地估算。
+	// Antigravity / Copilot 账户不支持 count_tokens，返回 404 让客户端 fallback 到本地估算。
+	// Copilot 使用 session token（非 OAuth access_token），ForwardCountTokens 走的是通用
+	// GetAccessToken 路径会拿到原始 GitHub token 而非 session token，导致上游 401。
 	// 返回 nil 避免 handler 层记录为错误，也不设置 ops 上游错误上下文。
-	if account.Platform == PlatformAntigravity {
+	if account.Platform == PlatformAntigravity || account.Platform == PlatformCopilot {
 		s.countTokensError(c, http.StatusNotFound, "not_found_error", "count_tokens endpoint is not supported for this platform")
 		return nil
 	}

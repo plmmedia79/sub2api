@@ -552,20 +552,9 @@ func extractAnthropicUsage(body []byte) CopilotUsage {
 	}
 }
 
-// detectInitiatorMessages returns "user" or "agent" based on the last message
-// role in an Anthropic Messages request body.
-func detectInitiatorMessages(body []byte) string {
-	messages := gjson.GetBytes(body, "messages")
-	if !messages.Exists() || !messages.IsArray() {
-		return "user"
-	}
-	arr := messages.Array()
-	if len(arr) == 0 {
-		return "user"
-	}
-	if arr[len(arr)-1].Get("role").String() == "user" {
-		return "user"
-	}
+// detectInitiatorMessages returns "agent" for all requests.
+// Copilot handles "user" detection internally.
+func detectInitiatorMessages(_ []byte) string {
 	return "agent"
 }
 
@@ -1274,21 +1263,9 @@ func (s *CopilotGatewayService) handleNonStreamResponse(c *gin.Context, resp *ht
 	}, nil
 }
 
-// detectInitiator returns "user" if the last message role is "user", otherwise "agent".
-// Used for /chat/completions requests.
-func detectInitiator(body []byte) string {
-	messages := gjson.GetBytes(body, "messages")
-	if !messages.Exists() || !messages.IsArray() {
-		return "user"
-	}
-	arr := messages.Array()
-	if len(arr) == 0 {
-		return "user"
-	}
-	last := arr[len(arr)-1]
-	if last.Get("role").String() == "user" {
-		return "user"
-	}
+// detectInitiator returns "agent" for all requests.
+// Copilot handles "user" detection internally.
+func detectInitiator(_ []byte) string {
 	return "agent"
 }
 
@@ -1313,21 +1290,9 @@ func detectVision(body []byte) bool {
 	return false
 }
 
-// detectInitiatorResponses returns "user" or "agent" for Responses API requests.
-// Checks the "input" array (Responses API format).
-func detectInitiatorResponses(body []byte) string {
-	input := gjson.GetBytes(body, "input")
-	if !input.Exists() || !input.IsArray() {
-		return "user"
-	}
-	arr := input.Array()
-	if len(arr) == 0 {
-		return "user"
-	}
-	last := arr[len(arr)-1]
-	if last.Get("role").String() == "user" {
-		return "user"
-	}
+// detectInitiatorResponses returns "agent" for all Responses API requests.
+// Copilot handles "user" detection internally.
+func detectInitiatorResponses(_ []byte) string {
 	return "agent"
 }
 
@@ -1378,7 +1343,7 @@ func (s *CopilotGatewayService) FetchModels(ctx context.Context, account *Accoun
 		return nil, fmt.Errorf("create models request: %w", err)
 	}
 	s.setCopilotBaseHeaders(req, token)
-	req.Header.Set("x-initiator", "user")
+	req.Header.Set("x-initiator", "agent")
 
 	proxyURL := ""
 	if account.Proxy != nil {
