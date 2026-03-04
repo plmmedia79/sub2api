@@ -235,25 +235,22 @@ func (h *CopilotGatewayHandler) handleForward(c *gin.Context, endpoint string, f
 	}
 
 	// 3. Account scheduling loop with failover
-	maxAccountSwitches := h.maxAccountSwitches
-	switchCount := 0
-	failedAccountIDs := make(map[int64]struct{})
-	var lastFailoverErr *service.UpstreamFailoverError
+	fs := NewFailoverState(h.maxAccountSwitches, false)
 
 	for {
-		reqLog.Debug("copilot.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
-		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, "", reqModel, failedAccountIDs, "")
+		reqLog.Debug("copilot.account_selecting", zap.Int("excluded_account_count", len(fs.FailedAccountIDs)))
+		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, "", reqModel, fs.FailedAccountIDs, "")
 		if err != nil {
 			reqLog.Warn("copilot.account_select_failed",
 				zap.Error(err),
-				zap.Int("excluded_account_count", len(failedAccountIDs)),
+				zap.Int("excluded_account_count", len(fs.FailedAccountIDs)),
 			)
-			if len(failedAccountIDs) == 0 {
+			if len(fs.FailedAccountIDs) == 0 {
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
 				return
 			}
-			if lastFailoverErr != nil {
-				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
+			if fs.LastFailoverErr != nil {
+				h.handleFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 			} else {
 				h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "All upstream accounts exhausted", streamStarted)
 			}
@@ -340,20 +337,16 @@ func (h *CopilotGatewayHandler) handleForward(c *gin.Context, endpoint string, f
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
-				failedAccountIDs[account.ID] = struct{}{}
-				lastFailoverErr = failoverErr
-				if switchCount >= maxAccountSwitches {
+				action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, service.PlatformCopilot, failoverErr)
+				switch action {
+				case FailoverContinue:
+					continue
+				case FailoverExhausted:
 					h.handleFailoverExhausted(c, failoverErr, streamStarted)
 					return
+				case FailoverCanceled:
+					return
 				}
-				switchCount++
-				reqLog.Warn("copilot.upstream_failover_switching",
-					zap.Int64("account_id", account.ID),
-					zap.Int("upstream_status", failoverErr.StatusCode),
-					zap.Int("switch_count", switchCount),
-					zap.Int("max_switches", maxAccountSwitches),
-				)
-				continue
 			}
 			wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
 			reqLog.Error("copilot.forward_failed",

@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -17,6 +20,29 @@ import (
 	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
 )
+
+// isRetriableConnectionError detects network-level errors (EOF, timeout,
+// connection reset) that should trigger retry/failover instead of killing
+// the client session.
+func isRetriableConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "connection reset by peer") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "unexpected EOF")
+}
 
 // setCopilotBaseHeaders sets the Copilot upstream request headers.
 // Uses CLIProxyAPIPlus-style headers for Copilot API compatibility.
@@ -138,6 +164,11 @@ func (s *CopilotGatewayService) ForwardResponsesRaw(ctx context.Context, account
 	}
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
+		if isRetriableConnectionError(err) {
+			logger.L().Warn("copilot connection error, triggering retry (ForwardResponsesRaw)",
+				zap.Error(err), zap.Int64("account_id", account.ID))
+			return nil, "", &UpstreamFailoverError{RetryableOnSameAccount: true}
+		}
 		return nil, "", fmt.Errorf("copilot upstream request: %w", err)
 	}
 
@@ -200,6 +231,11 @@ func (s *CopilotGatewayService) forwardConverted(
 	}
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
+		if isRetriableConnectionError(err) {
+			logger.L().Warn("copilot connection error, triggering retry (forwardConverted)",
+				zap.Error(err), zap.Int64("account_id", account.ID))
+			return nil, &UpstreamFailoverError{RetryableOnSameAccount: true}
+		}
 		return nil, fmt.Errorf("copilot upstream request: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
@@ -261,6 +297,11 @@ func (s *CopilotGatewayService) ForwardMessages(ctx context.Context, c *gin.Cont
 	}
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
+		if isRetriableConnectionError(err) {
+			logger.L().Warn("copilot connection error, triggering retry (ForwardMessages)",
+				zap.Error(err), zap.Int64("account_id", account.ID))
+			return nil, &UpstreamFailoverError{RetryableOnSameAccount: true}
+		}
 		return nil, fmt.Errorf("copilot upstream request: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
@@ -386,6 +427,11 @@ func (s *CopilotGatewayService) forward(ctx context.Context, c *gin.Context, acc
 	}
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
+		if isRetriableConnectionError(err) {
+			logger.L().Warn("copilot connection error, triggering retry (forward)",
+				zap.Error(err), zap.Int64("account_id", account.ID))
+			return nil, &UpstreamFailoverError{RetryableOnSameAccount: true}
+		}
 		return nil, fmt.Errorf("copilot upstream request: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
