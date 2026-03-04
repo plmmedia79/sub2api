@@ -1670,10 +1670,9 @@ func (s *AccountTestService) testCopilotAccountConnection(c *gin.Context, accoun
 	req.Header.Set("User-Agent", copilotUserAgent)
 	req.Header.Set("Editor-Version", copilotEditorVersion)
 	req.Header.Set("Editor-Plugin-Version", copilotPluginVersion)
-	req.Header.Set("X-Github-Api-Version", copilotAPIVersion)
 	req.Header.Set("X-Request-Id", uuid.New().String())
-	req.Header.Set("Openai-Intent", "conversation-edits")
-	req.Header.Set("x-initiator", "user")
+	req.Header.Set("Copilot-Integration-Id", copilotIntegrationID)
+	req.Header.Set("Openai-Intent", copilotOpenAIIntent)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

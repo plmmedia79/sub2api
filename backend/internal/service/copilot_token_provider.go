@@ -15,10 +15,11 @@ import (
 
 const (
 	copilotTokenExchangeURL = "https://api.github.com/copilot_internal/v2/token"
-	copilotUserAgent        = "GitHubCopilotChat/0.35.0"
-	copilotEditorVersion    = "vscode/1.107.0"
-	copilotPluginVersion    = "copilot-chat/0.35.0"
-	copilotAPIVersion       = "2025-04-01"
+	copilotUserAgent        = "GithubCopilot/1.0"
+	copilotEditorVersion    = "vscode/1.100.0"
+	copilotPluginVersion    = "copilot/1.300.0"
+	copilotIntegrationID    = "vscode-chat"
+	copilotOpenAIIntent     = "conversation-panel"
 	tokenRefreshBuffer      = 5 * time.Minute
 	copilotTokenHTTPTimeout = 30 * time.Second
 )

@@ -119,9 +119,8 @@ CLAUDE.md
 .claude
 scripts
 .code-review-state
-#openspec/
 code-reviews/
-#AGENTS.md
+AGENTS.md
 backend/cmd/server/server
 deploy/docker-compose.override.yml
 .gocache/
@@ -132,4 +131,14 @@ docs/*
 frontend/coverage/
 aicodex
 output/
+
+# ===================
+# AI Tools & Plans
+# ===================
+.opencode/
+plans/
+backend/plans/
+repomix-output.*
+.repomixignore
+release-manifest.json
 

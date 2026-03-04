@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	copilotClientID         = "Ov23li8tweQw6odWQebz"
+	copilotClientID         = "Iv1.b507a08c87ecfe98"
 	copilotOAuthScope       = "read:user"
 	copilotDeviceCodeURL    = "https://github.com/login/device/code"
 	copilotAccessTokenURL   = "https://github.com/login/oauth/access_token"

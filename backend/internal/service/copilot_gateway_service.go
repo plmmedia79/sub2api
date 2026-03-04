@@ -105,23 +105,14 @@ func NewCopilotGatewayService(
 
 // setCopilotBaseHeaders sets the Copilot upstream request headers.
 // Uses CLIProxyAPIPlus-style headers for Copilot API compatibility.
-//
-// Headers set here (x-initiator, Copilot-Vision-Request are set separately in the forward path):
-//   - Authorization: Bearer {copilot_session_token}
-//   - User-Agent: GitHubCopilotChat/0.35.0
-//   - Editor-Version, Editor-Plugin-Version
-//   - X-Github-Api-Version, X-Request-Id
-//   - Openai-Intent: conversation-edits
 func (s *CopilotGatewayService) setCopilotBaseHeaders(req *http.Request, token string) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", copilotUserAgent)
 	req.Header.Set("Editor-Version", copilotEditorVersion)
 	req.Header.Set("Editor-Plugin-Version", copilotPluginVersion)
-	req.Header.Set("X-Github-Api-Version", copilotAPIVersion)
 	req.Header.Set("X-Request-Id", uuid.New().String())
-	// "conversation-edits" is the intent used for all requests.
-	// This is critical for accessing the full Claude model catalog.
-	req.Header.Set("Openai-Intent", "conversation-edits")
+	req.Header.Set("Copilot-Integration-Id", copilotIntegrationID)
+	req.Header.Set("Openai-Intent", copilotOpenAIIntent)
 }
 
 // Forward sends a chat/completions request to GitHub Copilot.
@@ -336,6 +327,9 @@ func (s *CopilotGatewayService) ForwardMessages(ctx context.Context, c *gin.Cont
 			return nil, fmt.Errorf("replace model in body: %w", err)
 		}
 	}
+
+	// Strip cache_control fields not supported by Copilot API (e.g. "scope")
+	body = stripCacheControlScope(body)
 
 	token, err := s.copilotTokenProvider.GetAccessToken(ctx, account)
 	if err != nil {
@@ -1412,4 +1406,35 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen]
+}
+
+// stripCacheControlScope removes "scope" from cache_control objects in system
+// and messages arrays. Copilot API rejects this field with 400.
+func stripCacheControlScope(body []byte) []byte {
+	// Strip from system array
+	sysArr := gjson.GetBytes(body, "system")
+	if sysArr.IsArray() {
+		for i, item := range sysArr.Array() {
+			if item.Get("cache_control.scope").Exists() {
+				body, _ = sjson.DeleteBytes(body, fmt.Sprintf("system.%d.cache_control.scope", i))
+			}
+		}
+	}
+	// Strip from messages and their content arrays
+	msgs := gjson.GetBytes(body, "messages")
+	if msgs.IsArray() {
+		for i, msg := range msgs.Array() {
+			if msg.Get("cache_control.scope").Exists() {
+				body, _ = sjson.DeleteBytes(body, fmt.Sprintf("messages.%d.cache_control.scope", i))
+			}
+			if msg.Get("content").IsArray() {
+				for j, block := range msg.Get("content").Array() {
+					if block.Get("cache_control.scope").Exists() {
+						body, _ = sjson.DeleteBytes(body, fmt.Sprintf("messages.%d.content.%d.cache_control.scope", i, j))
+					}
+				}
+			}
+		}
+	}
+	return body
 }
