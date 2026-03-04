@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
@@ -81,6 +82,7 @@ type CopilotGatewayService struct {
 	httpUpstream         HTTPUpstream
 	copilotTokenProvider *CopilotTokenProvider
 	versionService       *OpenCodeVersionService
+	responseHeaderFilter *responseheaders.CompiledHeaderFilter
 }
 
 // NewCopilotGatewayService creates a new CopilotGatewayService.
@@ -96,25 +98,28 @@ func NewCopilotGatewayService(
 		cfg:                  cfg,
 		httpUpstream:         httpUpstream,
 		copilotTokenProvider: copilotTokenProvider,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
 		versionService:       versionService,
 	}
 }
 
 // setCopilotBaseHeaders sets the Copilot upstream request headers.
-// IMPORTANT: This must match opencode (GitHub Copilot's official reference implementation) exactly.
-// opencode is in GitHub Copilot's official whitelist and its request format is guaranteed to work.
+// Uses CLIProxyAPIPlus-style headers for Copilot API compatibility.
 //
-// Source: https://github.com/opencode-ai/opencode/blob/main/packages/opencode/src/plugin/copilot.ts
-//
-// Key headers set here (x-initiator, Copilot-Vision-Request are set separately in the forward path):
-//   - Authorization: Bearer {token}
-//   - User-Agent: opencode/{version}
+// Headers set here (x-initiator, Copilot-Vision-Request are set separately in the forward path):
+//   - Authorization: Bearer {copilot_session_token}
+//   - User-Agent: GitHubCopilotChat/0.35.0
+//   - Editor-Version, Editor-Plugin-Version
+//   - X-Github-Api-Version, X-Request-Id
 //   - Openai-Intent: conversation-edits
 func (s *CopilotGatewayService) setCopilotBaseHeaders(req *http.Request, token string) {
-	ua := s.versionService.UserAgent()
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", ua)
-	// "conversation-edits" is the intent used by opencode for all requests.
+	req.Header.Set("User-Agent", copilotUserAgent)
+	req.Header.Set("Editor-Version", copilotEditorVersion)
+	req.Header.Set("Editor-Plugin-Version", copilotPluginVersion)
+	req.Header.Set("X-Github-Api-Version", copilotAPIVersion)
+	req.Header.Set("X-Request-Id", uuid.New().String())
+	// "conversation-edits" is the intent used for all requests.
 	// This is critical for accessing the full Claude model catalog.
 	req.Header.Set("Openai-Intent", "conversation-edits")
 }
@@ -430,7 +435,7 @@ func (s *CopilotGatewayService) handleMessagesNonStreamResponse(c *gin.Context, 
 		zap.Int("total_tokens", usage.TotalTokens),
 	)
 
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.cfg.Security.ResponseHeaders)
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 
 	return &CopilotForwardResult{
@@ -451,7 +456,7 @@ func (s *CopilotGatewayService) handleMessagesStreamResponse(c *gin.Context, res
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.cfg.Security.ResponseHeaders)
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.WriteHeader(http.StatusOK)
 
 	var usage CopilotUsage
@@ -652,7 +657,7 @@ func (s *CopilotGatewayService) handleResponsesToChatNonStream(c *gin.Context, r
 		}
 	}
 
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.cfg.Security.ResponseHeaders)
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.JSON(http.StatusOK, chatResp)
 
 	return &CopilotForwardResult{
@@ -672,7 +677,7 @@ func (s *CopilotGatewayService) handleResponsesToChatStream(c *gin.Context, resp
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.cfg.Security.ResponseHeaders)
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.WriteHeader(http.StatusOK)
 
 	state := apicompat.NewResponsesToChatStreamState()
@@ -893,7 +898,7 @@ func (s *CopilotGatewayService) handleAnthropicNonStreamResponse(c *gin.Context,
 		}
 	}
 
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.cfg.Security.ResponseHeaders)
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.JSON(http.StatusOK, anthropicResp)
 
 	return &CopilotForwardResult{
@@ -913,7 +918,7 @@ func (s *CopilotGatewayService) handleAnthropicStreamResponse(c *gin.Context, re
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.cfg.Security.ResponseHeaders)
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.WriteHeader(http.StatusOK)
 
 	state := apicompat.NewChatToAnthropicStreamState()
@@ -1137,6 +1142,11 @@ func (s *CopilotGatewayService) handleErrorResponse(c *gin.Context, resp *http.R
 		return nil, fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
 	}
 
+	// Invalidate cached session token on 401 so next attempt re-exchanges
+	if resp.StatusCode == http.StatusUnauthorized {
+		s.copilotTokenProvider.InvalidateCache(account.ID)
+	}
+
 	// Retriable codes → failover
 	if shouldFailoverCopilot(resp.StatusCode) {
 		return nil, &UpstreamFailoverError{
@@ -1146,7 +1156,7 @@ func (s *CopilotGatewayService) handleErrorResponse(c *gin.Context, resp *http.R
 	}
 
 	// Non-retriable error → write directly to client
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.cfg.Security.ResponseHeaders)
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 
 	return &CopilotForwardResult{
@@ -1165,7 +1175,7 @@ func (s *CopilotGatewayService) handleStreamResponse(c *gin.Context, resp *http.
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.cfg.Security.ResponseHeaders)
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.WriteHeader(http.StatusOK)
 
 	var usage CopilotUsage
@@ -1258,7 +1268,7 @@ func (s *CopilotGatewayService) handleNonStreamResponse(c *gin.Context, resp *ht
 		)
 	}
 
-	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.cfg.Security.ResponseHeaders)
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 
 	return &CopilotForwardResult{
@@ -1362,7 +1372,7 @@ func (s *CopilotGatewayService) FetchModelsFromUpstream(ctx context.Context) ([]
 }
 
 // FetchModels fetches the model list from GitHub Copilot upstream.
-// GET https://api.githubcopilot.com/models with opencode-style headers.
+// GET https://api.githubcopilot.com/models with Copilot-standard headers.
 func (s *CopilotGatewayService) FetchModels(ctx context.Context, account *Account) ([]byte, error) {
 	token, err := s.copilotTokenProvider.GetAccessToken(ctx, account)
 	if err != nil {

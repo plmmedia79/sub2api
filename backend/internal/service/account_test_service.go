@@ -1663,11 +1663,15 @@ func (s *AccountTestService) testCopilotAccountConnection(c *gin.Context, accoun
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
 
-	// Exact opencode headers — nothing more, nothing less.
+	// Copilot headers matching CLIProxyAPIPlus format.
 	// All headers built from scratch, zero passthrough.
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", s.versionService.UserAgent())
+	req.Header.Set("User-Agent", copilotUserAgent)
+	req.Header.Set("Editor-Version", copilotEditorVersion)
+	req.Header.Set("Editor-Plugin-Version", copilotPluginVersion)
+	req.Header.Set("X-Github-Api-Version", copilotAPIVersion)
+	req.Header.Set("X-Request-Id", uuid.New().String())
 	req.Header.Set("Openai-Intent", "conversation-edits")
 	req.Header.Set("x-initiator", "user")
 

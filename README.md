@@ -53,8 +53,22 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 
 ## Documentation
 
-- Dependency Security: `docs/dependency-security.md`
-- Admin Payment Integration API: `docs/ADMIN_PAYMENT_INTEGRATION_API.md`
+Comprehensive documentation is available in the `docs/` directory:
+
+### Core Documentation
+- **[Project Overview & PDR](docs/project-overview-pdr.md)** — Vision, features, requirements, and roadmap
+- **[System Architecture](docs/system-architecture.md)** — Technical design, data flow, components, and protocols
+- **[Code Standards](docs/code-standards.md)** — Backend (Go) and frontend (Vue/TS) coding conventions
+- **[Codebase Summary](docs/codebase-summary.md)** — Directory structure, file organization, and tech stack
+
+### Operations & Development
+- **[Deployment Guide](docs/deployment-guide.md)** — Installation (script, Docker, source), configuration, backup, and troubleshooting
+- **[Design Guidelines](docs/design-guidelines.md)** — UI/UX principles, component library, accessibility, and design patterns
+- **[Project Roadmap](docs/project-roadmap.md)** — Feature phases, milestones, priorities, and success metrics
+
+### Additional Resources
+- **Security:** See [tools/secret_scan.py](tools/secret_scan.py) for secret detection in git history
+- **Dependency Security:** [docs/dependency-security.md](docs/dependency-security.md)
 
 ---
 

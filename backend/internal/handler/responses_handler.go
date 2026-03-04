@@ -37,6 +37,7 @@ type ResponsesHandler struct {
 	concurrencyHelper       *ConcurrencyHelper
 	maxAccountSwitches      int
 	cfg                     *config.Config
+	responseHeaderFilter    *responseheaders.CompiledHeaderFilter
 }
 
 // NewResponsesHandler creates a new ResponsesHandler.
@@ -58,6 +59,10 @@ func NewResponsesHandler(
 			maxAccountSwitches = cfg.Gateway.MaxAccountSwitches
 		}
 	}
+	var headerFilter *responseheaders.CompiledHeaderFilter
+	if cfg != nil {
+		headerFilter = responseheaders.CompileHeaderFilter(cfg.Security.ResponseHeaders)
+	}
 	return &ResponsesHandler{
 		gatewayService:          gatewayService,
 		copilotGatewayService:   copilotGatewayService,
@@ -68,6 +73,7 @@ func NewResponsesHandler(
 		concurrencyHelper:       NewConcurrencyHelper(concurrencyService, SSEPingFormatComment, pingInterval),
 		maxAccountSwitches:      maxAccountSwitches,
 		cfg:                     cfg,
+		responseHeaderFilter:    headerFilter,
 	}
 }
 
@@ -418,7 +424,7 @@ func (h *ResponsesHandler) processResponsesStream(c *gin.Context, resp *http.Res
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
 	if h.cfg != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, h.cfg.Security.ResponseHeaders)
+		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, h.responseHeaderFilter)
 	}
 	c.Writer.WriteHeader(http.StatusOK)
 

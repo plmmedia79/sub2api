@@ -789,11 +789,11 @@ func (s *AccountUsageService) getCopilotUsage(ctx context.Context, account *Acco
 		UpdatedAt: &now,
 	}
 
-	// 获取 access_token
-	tokenProvider := NewCopilotTokenProvider()
-	accessToken, err := tokenProvider.GetAccessToken(ctx, account)
-	if err != nil {
-		log.Printf("Failed to get copilot access token for account %d: %v", account.ID, err)
+	// Usage API (/copilot_internal/user) requires raw GitHub OAuth token with "token" prefix,
+	// NOT the exchanged Copilot session token. Read directly from credentials.
+	accessToken := account.GetCredential("access_token")
+	if accessToken == "" {
+		log.Printf("No access_token in credentials for copilot account %d", account.ID)
 		return s.getCopilotLocalUsage(ctx, account, now)
 	}
 
