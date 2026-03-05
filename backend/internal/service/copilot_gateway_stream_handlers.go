@@ -17,6 +17,15 @@ import (
 	"go.uber.org/zap"
 )
 
+// streamKeepaliveInterval returns the configured keepalive interval for SSE streams.
+// Returns 0 if disabled. Default is 10s (configured via gateway.stream_keepalive_interval).
+func (s *CopilotGatewayService) streamKeepaliveInterval() time.Duration {
+	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+		return time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
+	}
+	return 0
+}
+
 // newSSEScanner creates a bufio.Scanner configured for SSE streaming responses.
 // Buffer starts at 64KB and grows up to 1MB per line.
 func newSSEScanner(r io.Reader) *bufio.Scanner {
@@ -105,8 +114,18 @@ func (s *CopilotGatewayService) handleStreamResponse(c *gin.Context, resp *http.
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.WriteHeader(http.StatusOK)
+
+	// Keepalive ticker to prevent proxy idle timeout (Cloudflare 100s)
+	keepaliveInterval := s.streamKeepaliveInterval()
+	var keepaliveTicker *time.Ticker
+	if keepaliveInterval > 0 {
+		keepaliveTicker = time.NewTicker(keepaliveInterval)
+		defer keepaliveTicker.Stop()
+	}
+	lastDataAt := time.Now()
 
 	var usage CopilotUsage
 	var firstTokenMs *int
@@ -114,40 +133,77 @@ func (s *CopilotGatewayService) handleStreamResponse(c *gin.Context, resp *http.
 
 	scanner := newSSEScanner(resp.Body)
 
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if firstChunk && strings.HasPrefix(line, "data: ") && line != "data: [DONE]" {
-			firstChunk = false
-			ms := int(time.Since(start).Milliseconds())
-			firstTokenMs = &ms
+	// Use a channel to read lines so we can select on keepalive
+	lineCh := make(chan string)
+	errCh := make(chan error, 1)
+	go func() {
+		for scanner.Scan() {
+			lineCh <- scanner.Text()
 		}
+		errCh <- scanner.Err()
+		close(lineCh)
+	}()
 
-		if strings.HasPrefix(line, "data: ") && line != "data: [DONE]" {
-			payload := line[6:]
-			// Try Chat Completions format (usage at top level)
-			u := gjson.Get(payload, "usage")
-			if u.Exists() {
-				usage = extract(u)
-			} else {
-				// Try Responses API format (usage nested in response.usage)
-				u = gjson.Get(payload, "response.usage")
+	scanDone := false
+	for !scanDone {
+		var keepaliveCh <-chan time.Time
+		if keepaliveTicker != nil {
+			keepaliveCh = keepaliveTicker.C
+		}
+		select {
+		case line, ok := <-lineCh:
+			if !ok {
+				scanDone = true
+				break
+			}
+			lastDataAt = time.Now()
+			if keepaliveTicker != nil {
+				keepaliveTicker.Reset(keepaliveInterval)
+			}
+
+			if firstChunk && strings.HasPrefix(line, "data: ") && line != "data: [DONE]" {
+				firstChunk = false
+				ms := int(time.Since(start).Milliseconds())
+				firstTokenMs = &ms
+			}
+
+			if strings.HasPrefix(line, "data: ") && line != "data: [DONE]" {
+				payload := line[6:]
+				// Try Chat Completions format (usage at top level)
+				u := gjson.Get(payload, "usage")
 				if u.Exists() {
-					// Convert Responses API format to Chat Completions format
-					pt := int(u.Get("input_tokens").Int())
-					ct := int(u.Get("output_tokens").Int())
-					usage = CopilotUsage{PromptTokens: pt, CompletionTokens: ct, TotalTokens: pt + ct}
+					usage = extract(u)
+				} else {
+					// Try Responses API format (usage nested in response.usage)
+					u = gjson.Get(payload, "response.usage")
+					if u.Exists() {
+						// Convert Responses API format to Chat Completions format
+						pt := int(u.Get("input_tokens").Int())
+						ct := int(u.Get("output_tokens").Int())
+						usage = CopilotUsage{PromptTokens: pt, CompletionTokens: ct, TotalTokens: pt + ct}
+					}
 				}
 			}
-		}
 
-		fmt.Fprintf(c.Writer, "%s\n", line)
-		c.Writer.Flush()
+			fmt.Fprintf(c.Writer, "%s\n", line)
+			c.Writer.Flush()
+		case <-keepaliveCh:
+			if time.Since(lastDataAt) >= keepaliveInterval {
+				fmt.Fprintf(c.Writer, ": keepalive\n\n")
+				c.Writer.Flush()
+			}
+		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	var scanErr error
+	select {
+	case scanErr = <-errCh:
+	default:
+	}
+
+	if scanErr != nil {
 		logger.L().Warn("copilot stream read error",
-			zap.Error(err),
+			zap.Error(scanErr),
 			zap.String("request_id", requestID),
 		)
 	}
@@ -249,8 +305,18 @@ func (s *CopilotGatewayService) handleMessagesStreamResponse(c *gin.Context, res
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.WriteHeader(http.StatusOK)
+
+	// Keepalive ticker to prevent proxy idle timeout (Cloudflare 100s)
+	keepaliveInterval := s.streamKeepaliveInterval()
+	var keepaliveTicker *time.Ticker
+	if keepaliveInterval > 0 {
+		keepaliveTicker = time.NewTicker(keepaliveInterval)
+		defer keepaliveTicker.Stop()
+	}
+	lastDataAt := time.Now()
 
 	var usage CopilotUsage
 	var firstTokenMs *int
@@ -258,47 +324,84 @@ func (s *CopilotGatewayService) handleMessagesStreamResponse(c *gin.Context, res
 
 	scanner := newSSEScanner(resp.Body)
 
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		// Track first data line for TTFT
-		if firstChunk && strings.HasPrefix(line, "data: ") {
-			firstChunk = false
-			ms := int(time.Since(start).Milliseconds())
-			firstTokenMs = &ms
+	// Use a channel to read lines so we can select on keepalive
+	lineCh := make(chan string)
+	errCh := make(chan error, 1)
+	go func() {
+		for scanner.Scan() {
+			lineCh <- scanner.Text()
 		}
+		errCh <- scanner.Err()
+		close(lineCh)
+	}()
 
-		// Extract usage from Anthropic SSE events
-		if strings.HasPrefix(line, "data: ") {
-			payload := line[6:]
-			eventType := gjson.Get(payload, "type").String()
-			switch eventType {
-			case "message_start":
-				// message_start → message.usage contains input_tokens + cache fields
-				u := gjson.Get(payload, "message.usage")
-				if u.Exists() {
-					inputTokens := int(u.Get("input_tokens").Int())
-					cacheCreation := int(u.Get("cache_creation_input_tokens").Int())
-					cacheRead := int(u.Get("cache_read_input_tokens").Int())
-					usage.PromptTokens = inputTokens + cacheCreation + cacheRead
-				}
-			case "message_delta":
-				// message_delta → usage.output_tokens
-				u := gjson.Get(payload, "usage")
-				if u.Exists() {
-					usage.CompletionTokens = int(u.Get("output_tokens").Int())
+	scanDone := false
+	for !scanDone {
+		var keepaliveCh <-chan time.Time
+		if keepaliveTicker != nil {
+			keepaliveCh = keepaliveTicker.C
+		}
+		select {
+		case line, ok := <-lineCh:
+			if !ok {
+				scanDone = true
+				break
+			}
+			lastDataAt = time.Now()
+			if keepaliveTicker != nil {
+				keepaliveTicker.Reset(keepaliveInterval)
+			}
+
+			// Track first data line for TTFT
+			if firstChunk && strings.HasPrefix(line, "data: ") {
+				firstChunk = false
+				ms := int(time.Since(start).Milliseconds())
+				firstTokenMs = &ms
+			}
+
+			// Extract usage from Anthropic SSE events
+			if strings.HasPrefix(line, "data: ") {
+				payload := line[6:]
+				eventType := gjson.Get(payload, "type").String()
+				switch eventType {
+				case "message_start":
+					// message_start → message.usage contains input_tokens + cache fields
+					u := gjson.Get(payload, "message.usage")
+					if u.Exists() {
+						inputTokens := int(u.Get("input_tokens").Int())
+						cacheCreation := int(u.Get("cache_creation_input_tokens").Int())
+						cacheRead := int(u.Get("cache_read_input_tokens").Int())
+						usage.PromptTokens = inputTokens + cacheCreation + cacheRead
+					}
+				case "message_delta":
+					// message_delta → usage.output_tokens
+					u := gjson.Get(payload, "usage")
+					if u.Exists() {
+						usage.CompletionTokens = int(u.Get("output_tokens").Int())
+					}
 				}
 			}
-		}
 
-		// Transparently forward every line (event:, data:, empty lines)
-		fmt.Fprintf(c.Writer, "%s\n", line)
-		c.Writer.Flush()
+			// Transparently forward every line (event:, data:, empty lines)
+			fmt.Fprintf(c.Writer, "%s\n", line)
+			c.Writer.Flush()
+		case <-keepaliveCh:
+			if time.Since(lastDataAt) >= keepaliveInterval {
+				fmt.Fprintf(c.Writer, ": keepalive\n\n")
+				c.Writer.Flush()
+			}
+		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	var scanErr error
+	select {
+	case scanErr = <-errCh:
+	default:
+	}
+
+	if scanErr != nil {
 		logger.L().Warn("copilot messages stream read error",
-			zap.Error(err),
+			zap.Error(scanErr),
 			zap.String("request_id", requestID),
 		)
 	}
